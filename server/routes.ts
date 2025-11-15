@@ -3,7 +3,25 @@ import { createServer, type Server } from "http";
 import { storage } from "./storage";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
-import { insertUserSchema } from "@shared/schema";
+import multer from "multer";
+import path from "path";
+import { insertUserSchema, propertyFormSchema } from "@shared/schema";
+
+// Configure multer for image uploads
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 5 * 1024 * 1024, // 5MB limit
+  },
+  fileFilter: (_req, file, cb) => {
+    const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (allowedMimes.includes(file.mimetype)) {
+      cb(null, true);
+    } else {
+      cb(new Error('Invalid file type. Only JPG, PNG and WEBP are allowed.'));
+    }
+  },
+});
 
 // JWT secret - in production, use environment variable
 const JWT_SECRET = process.env.SESSION_SECRET || "default-secret-key-change-in-production";
@@ -220,6 +238,238 @@ export async function registerRoutes(app: Express): Promise<Server> {
         amount: 800,
       },
     ]);
+  });
+
+  // ============================================================================
+  // PROPERTY MANAGEMENT ROUTES
+  // ============================================================================
+
+  // Get all properties
+  app.get("/api/properties", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const properties = await storage.getAllProperties();
+      res.json(properties);
+    } catch (error) {
+      console.error('Error getting properties:', error);
+      res.status(500).json({ message: 'Failed to get properties' });
+    }
+  });
+
+  // Get single property
+  app.get("/api/properties/:id", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const property = await storage.getProperty(id);
+      
+      if (!property) {
+        return res.status(404).json({ message: 'Property not found' });
+      }
+      
+      res.json(property);
+    } catch (error) {
+      console.error('Error getting property:', error);
+      res.status(500).json({ message: 'Failed to get property' });
+    }
+  });
+
+  // Create property
+  app.post("/api/properties", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const userId = (req as any).user.userId;
+      
+      // Validate request body
+      const validation = propertyFormSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          message: 'Validation failed', 
+          errors: validation.error.errors 
+        });
+      }
+
+      const propertyData = {
+        ...validation.data,
+        hostId: userId,
+        mapLocation: validation.data.mapLocation || '',
+        availabilityId: 1,
+      };
+
+      const propertyId = await storage.createProperty(propertyData);
+      res.status(201).json({ id: propertyId });
+    } catch (error) {
+      console.error('Error creating property:', error);
+      res.status(500).json({ message: 'Failed to create property' });
+    }
+  });
+
+  // Update property
+  app.put("/api/properties/:id", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const userId = (req as any).user.userId;
+      
+      // Validate request body
+      const validation = propertyFormSchema.safeParse(req.body);
+      if (!validation.success) {
+        return res.status(400).json({ 
+          message: 'Validation failed', 
+          errors: validation.error.errors 
+        });
+      }
+
+      const propertyData = {
+        ...validation.data,
+        hostId: userId,
+        mapLocation: validation.data.mapLocation || '',
+        availabilityId: validation.data.availibilityId || 1,
+      };
+
+      await storage.updateProperty(id, propertyData);
+      res.status(204).send();
+    } catch (error) {
+      console.error('Error updating property:', error);
+      res.status(500).json({ message: 'Failed to update property' });
+    }
+  });
+
+  // Delete property
+  app.delete("/api/properties/:id", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteProperty(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error('Error deleting property:', error);
+      res.status(500).json({ message: 'Failed to delete property' });
+    }
+  });
+
+  // Get property types
+  app.get("/api/property-types", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const propertyTypes = await storage.getAllPropertyTypes();
+      res.json(propertyTypes);
+    } catch (error) {
+      console.error('Error getting property types:', error);
+      res.status(500).json({ message: 'Failed to get property types' });
+    }
+  });
+
+  // Get cities
+  app.get("/api/cities", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const cities = await storage.getAllCities();
+      res.json(cities);
+    } catch (error) {
+      console.error('Error getting cities:', error);
+      res.status(500).json({ message: 'Failed to get cities' });
+    }
+  });
+
+  // Get amenities
+  app.get("/api/amenities", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const amenities = await storage.getAllAmenities();
+      res.json(amenities);
+    } catch (error) {
+      console.error('Error getting amenities:', error);
+      res.status(500).json({ message: 'Failed to get amenities' });
+    }
+  });
+
+  // Get room types
+  app.get("/api/room-types", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const roomTypes = await storage.getRoomTypes();
+      res.json(roomTypes);
+    } catch (error) {
+      console.error('Error getting room types:', error);
+      res.status(500).json({ message: 'Failed to get room types' });
+    }
+  });
+
+  // Get availabilities
+  app.get("/api/availabilities", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const availabilities = await storage.getAllAvailabilities();
+      res.json(availabilities);
+    } catch (error) {
+      console.error('Error getting availabilities:', error);
+      res.status(500).json({ message: 'Failed to get availabilities' });
+    }
+  });
+
+  // Upload picture
+  app.post("/api/pictures", authenticateToken, upload.single('file'), async (req: Request, res: Response) => {
+    try {
+      if (!req.file) {
+        return res.status(400).json({ message: 'No file uploaded' });
+      }
+
+      const { entityId, entityType } = req.query;
+      
+      if (!entityId || !entityType) {
+        return res.status(400).json({ message: 'entityId and entityType are required' });
+      }
+
+      // In a real app, you would upload to cloud storage (S3, Cloudinary, etc.)
+      // For now, we'll store as base64 data URL
+      const base64Image = req.file.buffer.toString('base64');
+      const dataUrl = `data:${req.file.mimetype};base64,${base64Image}`;
+
+      const picture = await storage.createPicture({
+        fileName: req.file.originalname,
+        contentType: req.file.mimetype,
+        fileSize: req.file.size,
+        pictureType: "Regular",
+        entityId: parseInt(entityId as string),
+        entityType: entityType as "Property" | "Room",
+        url: dataUrl,
+      });
+
+      res.status(201).json(picture);
+    } catch (error) {
+      console.error('Error uploading picture:', error);
+      res.status(500).json({ message: 'Failed to upload picture' });
+    }
+  });
+
+  // Get pictures by entity
+  app.get("/api/pictures/:entityType/:entityId", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const { entityType, entityId } = req.params;
+      const pictures = await storage.getPicturesByEntity(
+        entityType as "Property" | "Room",
+        parseInt(entityId)
+      );
+      res.json(pictures);
+    } catch (error) {
+      console.error('Error getting pictures:', error);
+      res.status(500).json({ message: 'Failed to get pictures' });
+    }
+  });
+
+  // Delete picture
+  app.delete("/api/pictures/:id", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deletePicture(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error('Error deleting picture:', error);
+      res.status(500).json({ message: 'Failed to delete picture' });
+    }
+  });
+
+  // Get rooms by property
+  app.get("/api/rooms/property/:propertyId", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const propertyId = parseInt(req.params.propertyId);
+      const rooms = await storage.getRoomsByProperty(propertyId);
+      res.json(rooms);
+    } catch (error) {
+      console.error('Error getting rooms:', error);
+      res.status(500).json({ message: 'Failed to get rooms' });
+    }
   });
 
   const httpServer = createServer(app);
