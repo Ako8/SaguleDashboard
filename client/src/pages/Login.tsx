@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLocation } from 'wouter';
 import { useForm } from 'react-hook-form';
@@ -34,10 +34,17 @@ const loginSchema = yup.object({
 type LoginFormData = yup.InferType<typeof loginSchema>;
 
 export default function Login() {
-  const { login } = useAuth();
+  const { login, user } = useAuth();
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
+
+  // Redirect to dashboard if already logged in
+  useEffect(() => {
+    if (user) {
+      navigate('/dashboard');
+    }
+  }, [user, navigate]);
 
   const form = useForm<LoginFormData>({
     resolver: yupResolver(loginSchema),
@@ -51,11 +58,12 @@ export default function Login() {
     setIsLoading(true);
     try {
       await login(data.email, data.password);
+      // Show success toast - navigation will happen via useEffect when user state updates
       toast({
         title: 'Welcome back!',
         description: 'You have successfully logged in.',
       });
-      navigate('/dashboard');
+      // The useEffect hook will handle navigation when user state is set
     } catch (error) {
       toast({
         variant: 'destructive',
