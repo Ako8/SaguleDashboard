@@ -80,99 +80,105 @@ export type Guest = typeof guests.$inferSelect;
 export type InsertGuest = z.infer<typeof insertGuestSchema>;
 
 // ============================================================================
-// TYPESCRIPT INTERFACES FOR EXTERNAL API DATA
-// These don't have database tables - they come from the external API
+// PROPERTIES & PROPERTY MANAGEMENT
 // ============================================================================
 
-// Property from external API
-export interface Property {
-  id: number;
-  hostId: number;
-  name: string;
-  description: string;
-  propertyTypeId: number;
-  availibilityId: number;
-  address: string;
-  cityId: number;
-  mapLocation: string;
-  price: number;
-  minNight: number;
-  maxNight: number;
-  checkInTime: string; // timespan format "HH:mm:ss"
-  checkOutTime: string; // timespan format "HH:mm:ss"
-}
+export const properties = pgTable("properties", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  hostId: varchar("host_id").notNull(),
+  name: text("name").notNull(),
+  description: text("description"),
+  propertyTypeId: integer("property_type_id").notNull(),
+  availabilityId: integer("availability_id").default(1),
+  address: text("address").notNull(),
+  cityId: integer("city_id").notNull(),
+  mapLocation: text("map_location"),
+  price: integer("price").notNull(),
+  minNight: integer("min_night").default(1),
+  maxNight: integer("max_night").default(30),
+  checkInTime: text("check_in_time").default("14:00:00"),
+  checkOutTime: text("check_out_time").default("11:00:00"),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow(),
+});
 
-export interface PropertyType {
-  id: number;
-  name: string;
-  iconUrl: string;
-  displayOrder: number;
-}
+export const propertyTypes = pgTable("property_types", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  iconUrl: text("icon_url").notNull(),
+  displayOrder: integer("display_order").default(0),
+});
 
-// Room from external API
-export interface Room {
-  id: number;
-  propertyId: number;
-  roomTypeId: number;
-  availibilityId: number;
-  capacity: number | null;
-  bedsCount: number | null;
-  description: string;
-}
+export const cities = pgTable("cities", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  displayOrder: integer("display_order").default(0),
+  regionId: integer("region_id").notNull(),
+});
 
-export interface RoomType {
-  id: number;
-  name: string;
-  iconUrl: string;
-  displayOrder: number;
-}
+export const amenities = pgTable("amenities", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  icon: text("icon").notNull(),
+  amenityCategoryId: integer("amenity_category_id").notNull(),
+  category: text("category"),
+});
 
-// Location data
-export interface City {
-  id: number;
-  name: string;
-  displayOrder: number;
-  regionId: number;
-}
+export const amenityCategories = pgTable("amenity_categories", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+});
 
+export const roomTypes = pgTable("room_types", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+  iconUrl: text("icon_url").notNull(),
+  displayOrder: integer("display_order").default(0),
+});
+
+export const rooms = pgTable("rooms", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  propertyId: integer("property_id").notNull(),
+  roomTypeId: integer("room_type_id").notNull(),
+  availabilityId: integer("availability_id").default(1),
+  capacity: integer("capacity"),
+  bedsCount: integer("beds_count"),
+  description: text("description"),
+});
+
+export const availabilities = pgTable("availabilities", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  name: text("name").notNull(),
+});
+
+export const pictures = pgTable("pictures", {
+  id: integer("id").primaryKey().generatedAlwaysAsIdentity(),
+  fileName: text("file_name").notNull(),
+  contentType: text("content_type").notNull(),
+  fileSize: integer("file_size").notNull(),
+  pictureType: text("picture_type").notNull(), // "Icon" or "Regular"
+  entityId: integer("entity_id").notNull(),
+  entityType: text("entity_type").notNull(), // "Property" or "Room"
+  uploadedAt: timestamp("uploaded_at").defaultNow(),
+  url: text("url").notNull(),
+});
+
+export type Property = typeof properties.$inferSelect;
+export type PropertyType = typeof propertyTypes.$inferSelect;
+export type City = typeof cities.$inferSelect;
+export type Amenity = typeof amenities.$inferSelect;
+export type AmenityCategory = typeof amenityCategories.$inferSelect;
+export type Room = typeof rooms.$inferSelect;
+export type RoomType = typeof roomTypes.$inferSelect;
+export type Availability = typeof availabilities.$inferSelect;
+export type Picture = typeof pictures.$inferSelect;
+
+// Region (not in database, just for reference)
 export interface Region {
   id: number;
   name: string;
   displayOrder: number;
-  cities?: City[]; // Optional, for nested response
-}
-
-// Amenities
-export interface Amenity {
-  id: number;
-  name: string;
-  icon: string;
-  amenityCategoryId: number;
-  category?: string; // Optional, included in some responses
-}
-
-export interface AmenityCategory {
-  id: number;
-  name: string;
-}
-
-// Availability
-export interface Availability {
-  id: number;
-  name: string;
-}
-
-// Pictures
-export interface Picture {
-  id: number;
-  fileName: string;
-  contentType: string;
-  fileSize: number;
-  pictureType: "Icon" | "Regular";
-  entityId: number;
-  entityType: "Property" | "Room";
-  uploadedAt: string;
-  url: string;
+  cities?: City[];
 }
 
 // Calendar Sync

@@ -1,0 +1,905 @@
+# Build Properties Management Page - Complete Prompt
+
+## Context
+I have a React + TypeScript dashboard with authentication and layout already built. I need to create a complete Properties Management page with full CRUD functionality.
+
+---
+
+## 📋 REQUIREMENTS
+
+### Page: Properties List & Management
+**File to create:** `src/pages/PropertiesPage.tsx`
+
+---
+
+## 🎯 FEATURES TO IMPLEMENT
+
+### 1. TOP ACTION BAR
+
+Create a Material-UI Toolbar with:
+
+**Left Side:**
+- Search TextField
+  - Placeholder: "Search properties..."
+  - Icon: SearchIcon
+  - Full width on mobile
+  - Width: 300px on desktop
+  - Real-time filtering (debounced 300ms)
+
+**Right Side (Filter Controls):**
+- City Filter Dropdown (FormControl + Select)
+  - Label: "City"
+  - Options: Fetch from API
+  - "All Cities" as default option
+  
+- Property Type Filter Dropdown
+  - Label: "Property Type"  
+  - Options: Fetch from API
+  - "All Types" as default option
+
+- Add New Property Button
+  - Variant: "contained"
+  - Color: "primary"
+  - Icon: AddIcon
+  - Text: "Add Property"
+  - Opens PropertyForm dialog
+
+**Layout:** Stack vertically on mobile, horizontal on desktop
+
+---
+
+### 2. PROPERTIES GRID
+
+**Grid Layout:**
+- Use Material-UI Grid container
+- Spacing: 3
+- Columns:
+  - xs={12} (mobile: 1 column)
+  - sm={6} (tablet: 2 columns)
+  - md={4} (desktop: 3 columns)
+
+**Each Property Card:**
+
+Use Material-UI Card component with this structure:
+
+```
+┌─────────────────────────────┐
+│                             │
+│      [Property Image]       │ ← CardMedia, height: 200px
+│                             │
+├─────────────────────────────┤
+│ Villa Rosa              ★   │ ← Typography variant="h6"
+│ 🏠 Villa                    │ ← Chip with property type
+│ 📍 123 Main St, Batumi      │ ← Typography variant="body2"
+│                             │
+│ 💰 $150/night               │ ← Typography variant="h5", color="primary"
+│ 🛏️ 3 Rooms                  │ ← Typography variant="body2"
+│                             │
+├─────────────────────────────┤
+│ [Edit Button] [Delete Btn]  │ ← CardActions
+└─────────────────────────────┘
+```
+
+**Card Features:**
+- elevation={2}
+- Hover effect: elevation={8}
+- Border radius: 2
+- Image: object-fit: cover
+- If no image: Show placeholder with PropertyIcon
+- Status badge: Show "Available" or "Unavailable" chip at top-right
+
+**Card Actions:**
+- Edit IconButton (EditIcon) - Opens edit form dialog
+- Delete IconButton (DeleteIcon) - Shows confirmation dialog
+
+---
+
+### 3. PROPERTY FORM DIALOG
+
+**Create separate component:** `src/components/properties/PropertyForm.tsx`
+
+**Dialog Props:**
+- open: boolean
+- onClose: function
+- propertyId: number | null (null = create mode, number = edit mode)
+- onSave: function (refreshes properties list)
+
+**Dialog Settings:**
+- fullWidth
+- maxWidth="lg"
+- PaperProps: sx={{ height: '90vh' }}
+
+**Use Material-UI Tabs for Multi-Step Form:**
+
+#### TAB 1: Basic Information
+
+**Form Fields (2-column layout on desktop, stack on mobile):**
+
+Left Column:
+```typescript
+1. name
+   - TextField
+   - label: "Property Name"
+   - required
+   - fullWidth
+   - validation: required, min 3 chars
+
+2. description
+   - TextField
+   - label: "Description"
+   - multiline
+   - rows: 4
+   - fullWidth
+   - validation: optional, max 500 chars
+
+3. address
+   - TextField
+   - label: "Address"
+   - required
+   - fullWidth
+   - validation: required
+```
+
+Right Column:
+```typescript
+4. propertyTypeId
+   - Select (FormControl)
+   - label: "Property Type"
+   - required
+   - Options: Fetch from GET /api/PropertyType
+   - Display: type.name
+   - Value: type.id
+
+5. cityId
+   - Select (FormControl)
+   - label: "City"
+   - required
+   - Options: Fetch from GET /api/City
+   - Display: city.name
+   - Value: city.id
+
+6. price
+   - TextField
+   - label: "Price per Night"
+   - type: "number"
+   - required
+   - InputProps: startAdornment: "$"
+   - validation: required, min 0
+
+7. minNight
+   - TextField
+   - label: "Minimum Nights"
+   - type: "number"
+   - defaultValue: 1
+   - validation: min 1
+
+8. maxNight
+   - TextField
+   - label: "Maximum Nights"
+   - type: "number"
+   - defaultValue: 30
+   - validation: min 1
+```
+
+Bottom Row (Full Width):
+```typescript
+9. checkInTime
+   - TextField
+   - label: "Check-in Time"
+   - type: "time"
+   - defaultValue: "14:00"
+   - InputLabelProps: { shrink: true }
+
+10. checkOutTime
+    - TextField
+    - label: "Check-out Time"
+    - type: "time"
+    - defaultValue: "11:00"
+    - InputLabelProps: { shrink: true }
+```
+
+**Validation Schema (Yup):**
+```typescript
+const schema = yup.object({
+  name: yup.string().required("Name is required").min(3, "Min 3 characters"),
+  description: yup.string().max(500, "Max 500 characters"),
+  propertyTypeId: yup.number().required("Property type is required"),
+  address: yup.string().required("Address is required"),
+  cityId: yup.number().required("City is required"),
+  price: yup.number().required("Price is required").min(0, "Price must be positive"),
+  minNight: yup.number().min(1, "Min 1 night").default(1),
+  maxNight: yup.number().min(1, "Min 1 night").default(30),
+  checkInTime: yup.string().default("14:00:00"),
+  checkOutTime: yup.string().default("11:00:00"),
+});
+```
+
+#### TAB 2: Photos
+
+**Features:**
+- Drag-and-drop upload zone
+- Accept: image/jpeg, image/png, image/webp
+- Max file size: 5MB per image
+- Max total images: 10
+
+**Upload Zone (use react-dropzone or custom):**
+```
+┌─────────────────────────────────────┐
+│                                     │
+│   📷 Drag photos here or click      │
+│      to browse                      │
+│                                     │
+│   [Browse Files]                    │
+│                                     │
+│   Max 10 images, 5MB each           │
+│   Supported: JPG, PNG, WEBP         │
+└─────────────────────────────────────┘
+```
+
+**Image Preview Grid:**
+- Grid with 3 columns
+- Each preview shows:
+  - Image thumbnail (150x150)
+  - Delete button (X icon, top-right corner)
+  - "Main Image" badge on first image (or set main button)
+  - File name below
+  - File size below
+
+**Image Upload Logic:**
+- Store selected files in state as File[] array
+- On form submit (Save button), upload each to API
+- Show upload progress for each image
+
+#### TAB 3: Rooms
+
+**Show message:**
+```
+Rooms can be added after the property is created.
+Save the property first, then edit it to add rooms.
+```
+
+Or implement full room management:
+- List of existing rooms (if edit mode)
+- "Add Room" button - Opens RoomForm dialog
+- Each room shows: Type, Capacity, Beds, [Edit] [Delete]
+
+#### TAB 4: Amenities
+
+**Features:**
+- Fetch amenities: GET /api/Amenity
+- Group by category
+- Display as checkboxes
+
+**Layout:**
+```
+Kitchen & Dining
+  ☑ WiFi
+  ☐ Kitchen
+  ☑ Coffee Maker
+  ☐ Dishwasher
+
+Bathroom
+  ☑ Hot Water
+  ☐ Bathtub
+  ☑ Shower
+
+Entertainment
+  ☐ TV
+  ☑ Netflix
+  ☐ Board Games
+```
+
+Implementation:
+- FormGroup for each category
+- FormControlLabel with Checkbox for each amenity
+- Store selected amenity IDs in state
+
+**Dialog Actions (Bottom):**
+- Cancel Button (variant="outlined") - Closes dialog
+- Save Button (variant="contained", color="primary") - Submits form
+
+---
+
+### 4. DATA FETCHING & STATE MANAGEMENT
+
+**State Variables Needed:**
+```typescript
+const [properties, setProperties] = useState<Property[]>([]);
+const [propertyTypes, setPropertyTypes] = useState<PropertyType[]>([]);
+const [cities, setCities] = useState<City[]>([]);
+const [loading, setLoading] = useState(true);
+const [searchTerm, setSearchTerm] = useState("");
+const [selectedCity, setSelectedCity] = useState<number | "">("");
+const [selectedType, setSelectedType] = useState<number | "">("");
+const [formOpen, setFormOpen] = useState(false);
+const [editingPropertyId, setEditingPropertyId] = useState<number | null>(null);
+```
+
+**On Component Mount:**
+```typescript
+useEffect(() => {
+  fetchProperties();
+  fetchPropertyTypes();
+  fetchCities();
+}, []);
+```
+
+**Filtering Logic:**
+```typescript
+const filteredProperties = properties.filter(property => {
+  const matchesSearch = property.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                       property.address.toLowerCase().includes(searchTerm.toLowerCase());
+  const matchesCity = selectedCity === "" || property.cityId === selectedCity;
+  const matchesType = selectedType === "" || property.propertyTypeId === selectedType;
+  
+  return matchesSearch && matchesCity && matchesType;
+});
+```
+
+---
+
+### 5. API INTEGRATION
+
+**API Endpoints to Use:**
+
+```typescript
+// Base URL from environment
+const API_BASE_URL = process.env.REACT_APP_API_BASE_URL;
+
+// GET all properties
+GET /api/Property
+Response: Property[]
+
+// GET single property
+GET /api/Property/{id}
+Response: Property
+
+// POST create property
+POST /api/Property
+Body: Omit<Property, 'id'>
+Response: 201 Created, returns { id: number }
+
+// PUT update property
+PUT /api/Property/{id}
+Body: Omit<Property, 'id'>
+Response: 204 No Content
+
+// DELETE property
+DELETE /api/Property/{id}
+Response: 204 No Content
+
+// GET property types
+GET /api/PropertyType
+Response: PropertyType[]
+
+// GET cities
+GET /api/City
+Response: City[]
+
+// POST upload image
+POST /api/Pictures/regular?entityId={propertyId}&entityType=Property
+Body: FormData with 'file' field
+Content-Type: multipart/form-data
+Response: 201 Created, returns Picture object
+
+// GET property images
+GET /api/Pictures/entity/Property/{propertyId}
+Optional query param: pictureType=2 (for regular images)
+Response: Picture[]
+
+// DELETE image
+DELETE /api/Pictures/{id}
+Response: 204 No Content
+```
+
+---
+
+### 6. TYPESCRIPT TYPES
+
+**Define these interfaces in `src/types/index.ts`:**
+
+```typescript
+export interface Property {
+  id: number;
+  hostId: number;
+  name: string;
+  description: string;
+  propertyTypeId: number;
+  availibilityId: number;
+  address: string;
+  cityId: number;
+  mapLocation: string;
+  price: number;
+  minNight: number;
+  maxNight: number;
+  checkInTime: string; // "HH:mm:ss" format
+  checkOutTime: string; // "HH:mm:ss" format
+}
+
+export interface PropertyType {
+  id: number;
+  name: string;
+  iconUrl: string;
+  displayOrder: number;
+}
+
+export interface City {
+  id: number;
+  name: string;
+  displayOrder: number;
+  regionId: number;
+}
+
+export interface Picture {
+  id: number;
+  fileName: string;
+  contentType: string;
+  fileSize: number;
+  pictureType: 'Icon' | 'Regular';
+  entityId: number;
+  entityType: 'Property' | 'Room';
+  uploadedAt: string;
+  url: string;
+}
+
+export interface Amenity {
+  id: number;
+  name: string;
+  icon: string;
+  category: string;
+}
+```
+
+---
+
+### 7. API SERVICE FUNCTIONS
+
+**Create `src/api/propertyApi.ts`:**
+
+```typescript
+import axios from '../utils/axiosInstance';
+import { Property, PropertyType, City, Picture } from '../types';
+
+export const getAllProperties = async (): Promise<Property[]> => {
+  const response = await axios.get('/api/Property');
+  return response.data;
+};
+
+export const getPropertyById = async (id: number): Promise<Property> => {
+  const response = await axios.get(`/api/Property/${id}`);
+  return response.data;
+};
+
+export const createProperty = async (data: Omit<Property, 'id'>): Promise<number> => {
+  const response = await axios.post('/api/Property', data);
+  return response.data; // Returns created property ID
+};
+
+export const updateProperty = async (id: number, data: Omit<Property, 'id'>): Promise<void> => {
+  await axios.put(`/api/Property/${id}`, data);
+};
+
+export const deleteProperty = async (id: number): Promise<void> => {
+  await axios.delete(`/api/Property/${id}`);
+};
+
+export const getAllPropertyTypes = async (): Promise<PropertyType[]> => {
+  const response = await axios.get('/api/PropertyType');
+  return response.data;
+};
+
+export const getAllCities = async (): Promise<City[]> => {
+  const response = await axios.get('/api/City');
+  return response.data;
+};
+
+export const uploadPropertyImage = async (
+  propertyId: number,
+  file: File
+): Promise<Picture> => {
+  const formData = new FormData();
+  formData.append('file', file);
+  
+  const response = await axios.post(
+    `/api/Pictures/regular?entityId=${propertyId}&entityType=Property`,
+    formData,
+    {
+      headers: {
+        'Content-Type': 'multipart/form-data',
+      },
+    }
+  );
+  return response.data;
+};
+
+export const getPropertyImages = async (propertyId: number): Promise<Picture[]> => {
+  const response = await axios.get(`/api/Pictures/entity/Property/${propertyId}?pictureType=2`);
+  return response.data;
+};
+
+export const deleteImage = async (imageId: number): Promise<void> => {
+  await axios.delete(`/api/Pictures/${imageId}`);
+};
+```
+
+---
+
+### 8. FORM SUBMISSION LOGIC
+
+**Create Mode (propertyId === null):**
+```typescript
+const handleSubmit = async (formData) => {
+  try {
+    setLoading(true);
+    
+    // 1. Create property
+    const createdId = await createProperty({
+      ...formData,
+      hostId: currentUser.id, // From auth context
+      availibilityId: 1, // Default to available
+      mapLocation: "", // Optional, can add later
+    });
+    
+    // 2. Upload images if any
+    if (selectedImages.length > 0) {
+      for (const image of selectedImages) {
+        await uploadPropertyImage(createdId, image);
+      }
+    }
+    
+    // 3. Show success message
+    toast.success("Property created successfully!");
+    
+    // 4. Close dialog and refresh list
+    setFormOpen(false);
+    fetchProperties(); // Refresh the list
+    
+  } catch (error) {
+    toast.error("Failed to create property");
+    console.error(error);
+  } finally {
+    setLoading(false);
+  }
+};
+```
+
+**Edit Mode (propertyId !== null):**
+```typescript
+const handleSubmit = async (formData) => {
+  try {
+    setLoading(true);
+    
+    // 1. Update property
+    await updateProperty(editingPropertyId, formData);
+    
+    // 2. Upload new images if any
+    if (selectedImages.length > 0) {
+      for (const image of selectedImages) {
+        await uploadPropertyImage(editingPropertyId, image);
+      }
+    }
+    
+    // 3. Show success message
+    toast.success("Property updated successfully!");
+    
+    // 4. Close dialog and refresh list
+    setFormOpen(false);
+    fetchProperties(); // Refresh the list
+    
+  } catch (error) {
+    toast.error("Failed to update property");
+    console.error(error);
+  } finally {
+    setLoading(false);
+  }
+};
+```
+
+**Load Data in Edit Mode:**
+```typescript
+useEffect(() => {
+  if (propertyId) {
+    loadPropertyData(propertyId);
+  }
+}, [propertyId]);
+
+const loadPropertyData = async (id: number) => {
+  try {
+    const property = await getPropertyById(id);
+    const images = await getPropertyImages(id);
+    
+    // Set form values
+    reset(property);
+    
+    // Set images
+    setExistingImages(images);
+  } catch (error) {
+    toast.error("Failed to load property data");
+  }
+};
+```
+
+---
+
+### 9. DELETE CONFIRMATION
+
+**Use Material-UI Dialog:**
+```typescript
+const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+const [propertyToDelete, setPropertyToDelete] = useState<number | null>(null);
+
+const handleDeleteClick = (id: number) => {
+  setPropertyToDelete(id);
+  setDeleteDialogOpen(true);
+};
+
+const handleDeleteConfirm = async () => {
+  if (!propertyToDelete) return;
+  
+  try {
+    await deleteProperty(propertyToDelete);
+    toast.success("Property deleted successfully!");
+    fetchProperties(); // Refresh list
+  } catch (error) {
+    toast.error("Failed to delete property");
+  } finally {
+    setDeleteDialogOpen(false);
+    setPropertyToDelete(null);
+  }
+};
+```
+
+**Dialog Component:**
+```jsx
+<Dialog open={deleteDialogOpen} onClose={() => setDeleteDialogOpen(false)}>
+  <DialogTitle>Delete Property</DialogTitle>
+  <DialogContent>
+    <DialogContentText>
+      Are you sure you want to delete this property? This action cannot be undone.
+    </DialogContentText>
+  </DialogContent>
+  <DialogActions>
+    <Button onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
+    <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+      Delete
+    </Button>
+  </DialogActions>
+</Dialog>
+```
+
+---
+
+### 10. LOADING & EMPTY STATES
+
+**Loading State (while fetching properties):**
+```jsx
+{loading ? (
+  <Grid container spacing={3}>
+    {[1, 2, 3, 4, 5, 6].map((n) => (
+      <Grid item xs={12} sm={6} md={4} key={n}>
+        <Card>
+          <Skeleton variant="rectangular" height={200} />
+          <CardContent>
+            <Skeleton variant="text" height={32} />
+            <Skeleton variant="text" />
+            <Skeleton variant="text" />
+          </CardContent>
+        </Card>
+      </Grid>
+    ))}
+  </Grid>
+) : (
+  // ... actual properties grid
+)}
+```
+
+**Empty State (no properties found):**
+```jsx
+{filteredProperties.length === 0 && !loading && (
+  <Box
+    sx={{
+      textAlign: 'center',
+      py: 8,
+    }}
+  >
+    <HomeIcon sx={{ fontSize: 80, color: 'text.secondary', mb: 2 }} />
+    <Typography variant="h5" gutterBottom>
+      No properties found
+    </Typography>
+    <Typography variant="body1" color="text.secondary" sx={{ mb: 3 }}>
+      {searchTerm || selectedCity || selectedType
+        ? "Try adjusting your filters"
+        : "Get started by adding your first property"}
+    </Typography>
+    <Button
+      variant="contained"
+      startIcon={<AddIcon />}
+      onClick={() => setFormOpen(true)}
+    >
+      Add Property
+    </Button>
+  </Box>
+)}
+```
+
+---
+
+### 11. RESPONSIVE DESIGN
+
+**Mobile Breakpoints:**
+```jsx
+<Grid container spacing={3}>
+  {filteredProperties.map((property) => (
+    <Grid item xs={12} sm={6} md={4} key={property.id}>
+      {/* Property Card */}
+    </Grid>
+  ))}
+</Grid>
+```
+
+**Toolbar Responsive:**
+```jsx
+<Toolbar
+  sx={{
+    flexDirection: { xs: 'column', md: 'row' },
+    gap: 2,
+    alignItems: { xs: 'stretch', md: 'center' },
+  }}
+>
+  <TextField
+    sx={{ flexGrow: { xs: 1, md: 0 }, width: { md: 300 } }}
+    // ... search field
+  />
+  
+  <Box sx={{ display: 'flex', gap: 2, flexGrow: 1, justifyContent: 'flex-end' }}>
+    {/* Filters and Add button */}
+  </Box>
+</Toolbar>
+```
+
+---
+
+### 12. ERROR HANDLING
+
+**Wrap all API calls in try-catch:**
+```typescript
+const fetchProperties = async () => {
+  try {
+    setLoading(true);
+    const data = await getAllProperties();
+    setProperties(data);
+  } catch (error) {
+    toast.error("Failed to load properties");
+    console.error(error);
+  } finally {
+    setLoading(false);
+  }
+};
+```
+
+**Add toast notifications (install react-toastify):**
+```typescript
+import { toast } from 'react-toastify';
+
+// Success
+toast.success("Property created successfully!");
+
+// Error
+toast.error("Failed to create property");
+
+// Warning
+toast.warning("Please fill all required fields");
+
+// Info
+toast.info("Loading properties...");
+```
+
+---
+
+### 13. REQUIRED DEPENDENCIES
+
+Make sure these are installed:
+```bash
+npm install @mui/material @emotion/react @emotion/styled @mui/icons-material
+npm install react-hook-form yup @hookform/resolvers
+npm install react-toastify
+npm install axios
+```
+
+---
+
+### 14. AUTHENTICATION
+
+Assume axios instance is already configured with JWT token:
+```typescript
+// src/utils/axiosInstance.ts should already have:
+const instance = axios.create({
+  baseURL: process.env.REACT_APP_API_BASE_URL,
+});
+
+instance.interceptors.request.use((config) => {
+  const token = localStorage.getItem('token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+```
+
+---
+
+## 🎯 DELIVERABLES
+
+After implementation, I should have:
+
+1. ✅ **PropertiesPage.tsx** - Main page with grid, filters, search
+2. ✅ **PropertyForm.tsx** - Multi-tab form dialog
+3. ✅ **propertyApi.ts** - All API service functions
+4. ✅ **types/index.ts** - TypeScript interfaces (if not exists)
+
+**Features working:**
+- ✅ View all properties in responsive grid
+- ✅ Search properties by name/address
+- ✅ Filter by city and property type
+- ✅ Create new property with form
+- ✅ Edit existing property
+- ✅ Delete property with confirmation
+- ✅ Upload property images
+- ✅ View property images in card
+- ✅ Loading states with skeletons
+- ✅ Empty state when no properties
+- ✅ Error handling with toast notifications
+- ✅ Form validation
+- ✅ Responsive on mobile, tablet, desktop
+
+---
+
+## ✅ TESTING CHECKLIST
+
+After building, test:
+
+- [ ] Properties load on page mount
+- [ ] Search filters properties correctly
+- [ ] City filter works
+- [ ] Property type filter works
+- [ ] All filters work together
+- [ ] Add button opens form dialog
+- [ ] Create form submits and creates property
+- [ ] Edit button loads property data
+- [ ] Update form saves changes
+- [ ] Delete button shows confirmation
+- [ ] Delete removes property
+- [ ] Image upload works
+- [ ] Images display in cards
+- [ ] Loading skeleton shows during fetch
+- [ ] Empty state shows when no properties
+- [ ] Error messages show on API failure
+- [ ] Form validation works
+- [ ] Mobile view is usable
+- [ ] No console errors
+- [ ] No TypeScript errors
+
+---
+
+## 🚀 IMPLEMENTATION ORDER
+
+1. Create TypeScript types (if not exist)
+2. Create API service functions
+3. Create PropertiesPage.tsx with basic structure
+4. Add data fetching and state management
+5. Implement property grid with cards
+6. Add search and filters
+7. Add loading and empty states
+8. Create PropertyForm.tsx (basic info tab first)
+9. Add form validation
+10. Connect form to API (create/update)
+11. Add delete functionality
+12. Add photos tab to form
+13. Add image upload functionality
+14. Test everything
+15. Make responsive
+16. Polish UI/UX
+
+---
+
+Now build the Properties page following these exact specifications!
