@@ -62,6 +62,16 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
   // Fetch property data if editing
   const { data: property } = useQuery<Property>({
     queryKey: ['/api/properties', propertyId],
+    queryFn: async () => {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`/api/properties/${propertyId}`, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error('Failed to fetch property');
+      return await res.json();
+    },
     enabled: isEditMode && open,
   });
 
