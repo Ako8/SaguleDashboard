@@ -13,7 +13,7 @@ const upload = multer({
   limits: {
     fileSize: 5 * 1024 * 1024, // 5MB limit
   },
-  fileFilter: (_req, file, cb) => {
+  fileFilter: (_req: Request, file: Express.Multer.File, cb: multer.FileFilterCallback) => {
     const allowedMimes = ['image/jpeg', 'image/png', 'image/webp'];
     if (allowedMimes.includes(file.mimetype)) {
       cb(null, true);
@@ -26,6 +26,24 @@ const upload = multer({
 // JWT secret - in production, use environment variable
 const JWT_SECRET = process.env.SESSION_SECRET || "default-secret-key-change-in-production";
 
+// Helper function to extract user ID from JWT token
+function getUserIdFromToken(tokenPayload: any): string | null {
+  // Try different possible claim paths
+  if (tokenPayload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier']) {
+    return tokenPayload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'].toString();
+  }
+  if (tokenPayload.userId) {
+    return tokenPayload.userId.toString();
+  }
+  if (tokenPayload.sub) {
+    return tokenPayload.sub.toString();
+  }
+  if (tokenPayload.id) {
+    return tokenPayload.id.toString();
+  }
+  return null;
+}
+
 // Middleware to verify JWT token
 export function authenticateToken(req: Request, res: Response, next: Function) {
   const authHeader = req.headers['authorization'];
@@ -35,11 +53,16 @@ export function authenticateToken(req: Request, res: Response, next: Function) {
     return res.status(401).json({ message: 'Access token required' });
   }
 
-  jwt.verify(token, JWT_SECRET, (err: any, user: any) => {
+  jwt.verify(token, JWT_SECRET, (err: any, decoded: any) => {
     if (err) {
       return res.status(403).json({ message: 'Invalid or expired token' });
     }
-    (req as any).user = user;
+    // Store the decoded token and extract user ID
+    const userId = getUserIdFromToken(decoded);
+    (req as any).user = {
+      ...decoded,
+      userId: userId,
+    };
     next();
   });
 }
@@ -133,6 +156,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
   app.get("/api/auth/me", authenticateToken, async (req: Request, res: Response) => {
     try {
       const userId = (req as any).user.userId;
+      
+      if (!userId) {
+        return res.status(401).json({ message: 'User ID not found in token' });
+      }
+      
       const user = await storage.getUser(userId);
 
       if (!user) {
@@ -245,7 +273,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // ============================================================================
 
   // Get all properties
-  app.get("/api/properties", authenticateToken, async (req: Request, res: Response) => {
+  app.get("/api/property", authenticateToken, async (req: Request, res: Response) => {
     try {
       const properties = await storage.getAllProperties();
       res.json(properties);
@@ -256,7 +284,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get single property
-  app.get("/api/properties/:id", authenticateToken, async (req: Request, res: Response) => {
+  app.get("/api/property/:id", authenticateToken, async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
       const property = await storage.getProperty(id);
@@ -273,9 +301,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Create property
-  app.post("/api/properties", authenticateToken, async (req: Request, res: Response) => {
+  app.post("/api/property", authenticateToken, async (req: Request, res: Response) => {
     try {
-      const userId = (req as any).user.userId;
+      // Use hostId from payload if provided, otherwise extract from token
+      const userId = req.body.hostId || (req as any).user.userId;
+      
+      if (!userId) {
+        return res.status(401).json({ message: 'User ID not found in token or payload' });
+      }
       
       // Validate request body
       const validation = propertyFormSchema.safeParse(req.body);
@@ -289,7 +322,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const propertyData = {
         ...validation.data,
         hostId: userId,
-        mapLocation: validation.data.mapLocation || '',
+        description: validation.data.description ?? null,
+        mapLocation: validation.data.mapLocation || null,
         availabilityId: 1,
       };
 
@@ -302,10 +336,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Update property
-  app.put("/api/properties/:id", authenticateToken, async (req: Request, res: Response) => {
+  app.put("/api/property/:id", authenticateToken, async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
       const userId = (req as any).user.userId;
+      
+      if (!userId) {
+        return res.status(401).json({ message: 'User ID not found in token' });
+      }
       
       // Validate request body
       const validation = propertyFormSchema.safeParse(req.body);
@@ -319,7 +357,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const propertyData = {
         ...validation.data,
         hostId: userId,
-        mapLocation: validation.data.mapLocation || '',
+        description: validation.data.description ?? null,
+        mapLocation: validation.data.mapLocation || null,
         availabilityId: validation.data.availibilityId || 1,
       };
 
@@ -332,7 +371,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Delete property
-  app.delete("/api/properties/:id", authenticateToken, async (req: Request, res: Response) => {
+  app.delete("/api/property/:id", authenticateToken, async (req: Request, res: Response) => {
     try {
       const id = parseInt(req.params.id);
       await storage.deleteProperty(id);
@@ -344,7 +383,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get property types
-  app.get("/api/property-types", authenticateToken, async (req: Request, res: Response) => {
+  app.get("/api/propertytype", authenticateToken, async (req: Request, res: Response) => {
     try {
       const propertyTypes = await storage.getAllPropertyTypes();
       res.json(propertyTypes);
@@ -355,7 +394,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get cities
-  app.get("/api/cities", authenticateToken, async (req: Request, res: Response) => {
+  app.get("/api/city", authenticateToken, async (req: Request, res: Response) => {
     try {
       const cities = await storage.getAllCities();
       res.json(cities);
@@ -365,8 +404,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get amenities
-  app.get("/api/amenities", authenticateToken, async (req: Request, res: Response) => {
+  // Get amenities (support both endpoints for compatibility)
+  app.get("/api/amenity", authenticateToken, async (req: Request, res: Response) => {
     try {
       const amenities = await storage.getAllAmenities();
       res.json(amenities);
@@ -376,8 +415,53 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get room types
-  app.get("/api/room-types", authenticateToken, async (req: Request, res: Response) => {
+  app.get("/api/Amenity", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const amenities = await storage.getAllAmenities();
+      res.json(amenities);
+    } catch (error) {
+      console.error('Error getting amenities:', error);
+      res.status(500).json({ message: 'Failed to get amenities' });
+    }
+  });
+
+  // Get amenity categories
+  app.get("/api/AmenityCategory", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const categories = await storage.getAmenityCategories();
+      res.json(categories);
+    } catch (error) {
+      console.error('Error getting amenity categories:', error);
+      res.status(500).json({ message: 'Failed to get amenity categories' });
+    }
+  });
+
+  // Create amenity
+  app.post("/api/Amenity", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const { name, icon, amenityCategoryId } = req.body;
+
+      if (!name || !icon || !amenityCategoryId) {
+        return res.status(400).json({ message: 'name, icon, and amenityCategoryId are required' });
+      }
+
+      const amenityData = {
+        name: name,
+        icon: icon,
+        amenityCategoryId: parseInt(amenityCategoryId),
+        category: null, // Will be set by the database or computed
+      };
+
+      const amenityId = await storage.createAmenity(amenityData);
+      res.status(201).json({ id: amenityId });
+    } catch (error) {
+      console.error('Error creating amenity:', error);
+      res.status(500).json({ message: 'Failed to create amenity' });
+    }
+  });
+
+  // Get room types (support both endpoints for compatibility)
+  app.get("/api/roomtype", authenticateToken, async (req: Request, res: Response) => {
     try {
       const roomTypes = await storage.getRoomTypes();
       res.json(roomTypes);
@@ -387,8 +471,18 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Get availabilities
-  app.get("/api/availabilities", authenticateToken, async (req: Request, res: Response) => {
+  app.get("/api/RoomType", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const roomTypes = await storage.getRoomTypes();
+      res.json(roomTypes);
+    } catch (error) {
+      console.error('Error getting room types:', error);
+      res.status(500).json({ message: 'Failed to get room types' });
+    }
+  });
+
+
+  app.get("/api/Availibility", authenticateToken, async (req: Request, res: Response) => {
     try {
       const availabilities = await storage.getAllAvailabilities();
       res.json(availabilities);
@@ -399,7 +493,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Upload picture
-  app.post("/api/pictures", authenticateToken, upload.single('file'), async (req: Request, res: Response) => {
+  app.post("/api/pictures/regular", authenticateToken, upload.single('file'), async (req: Request, res: Response) => {
     try {
       if (!req.file) {
         return res.status(400).json({ message: 'No file uploaded' });
@@ -461,7 +555,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
   });
 
   // Get rooms by property
-  app.get("/api/rooms/property/:propertyId", authenticateToken, async (req: Request, res: Response) => {
+  app.get("/api/room/property/:propertyId", authenticateToken, async (req: Request, res: Response) => {
     try {
       const propertyId = parseInt(req.params.propertyId);
       const rooms = await storage.getRoomsByProperty(propertyId);
@@ -469,6 +563,61 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error('Error getting rooms:', error);
       res.status(500).json({ message: 'Failed to get rooms' });
+    }
+  });
+
+  // Create room
+  app.post("/api/Room", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const { propertyId, roomTypeId, availibilityId, capacity, bedsCount, description } = req.body;
+
+      if (!propertyId || !roomTypeId) {
+        return res.status(400).json({ message: 'propertyId and roomTypeId are required' });
+      }
+
+      const roomData = {
+        propertyId: parseInt(propertyId),
+        roomTypeId: parseInt(roomTypeId),
+        availabilityId: availibilityId ? parseInt(availibilityId) : 1,
+        capacity: capacity ? parseInt(capacity) : null,
+        bedsCount: bedsCount ? parseInt(bedsCount) : null,
+        description: description || null,
+      };
+
+      const roomId = await storage.createRoom(roomData);
+      res.status(201).json({ id: roomId });
+    } catch (error) {
+      console.error('Error creating room:', error);
+      res.status(500).json({ message: 'Failed to create room' });
+    }
+  });
+
+  // Get room by ID
+  app.get("/api/Room/:id", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      const room = await storage.getRoom(id);
+      
+      if (!room) {
+        return res.status(404).json({ message: 'Room not found' });
+      }
+      
+      res.json(room);
+    } catch (error) {
+      console.error('Error getting room:', error);
+      res.status(500).json({ message: 'Failed to get room' });
+    }
+  });
+
+  // Delete room
+  app.delete("/api/Room/:id", authenticateToken, async (req: Request, res: Response) => {
+    try {
+      const id = parseInt(req.params.id);
+      await storage.deleteRoom(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error('Error deleting room:', error);
+      res.status(500).json({ message: 'Failed to delete room' });
     }
   });
 

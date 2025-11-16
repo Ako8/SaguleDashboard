@@ -23,7 +23,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, buildApiUrl } from "@/lib/queryClient";
 import type { Property, PropertyType, City } from "@shared/schema";
 import { PropertyForm } from "@/components/properties/PropertyForm";
 
@@ -39,30 +39,32 @@ export default function PropertiesPage() {
 
   // Fetch data
   const { data: properties = [], isLoading: propertiesLoading } = useQuery<Property[]>({
-    queryKey: ['/api/properties'],
+    queryKey: ['/api/property'],
   });
 
   const { data: propertyTypes = [] } = useQuery<PropertyType[]>({
-    queryKey: ['/api/property-types'],
+    queryKey: ['/api/propertytype'],
   });
 
   const { data: cities = [] } = useQuery<City[]>({
-    queryKey: ['/api/cities'],
+    queryKey: ['/api/city'],
   });
 
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const res = await fetch(`/api/properties/${id}`, {
+      const token = localStorage.getItem('auth_token');
+      const url = buildApiUrl(`/api/property/${id}`);
+      const res = await fetch(url, {
         method: 'DELETE',
         headers: {
-          'Authorization': `Bearer ${localStorage.getItem('token')}`,
+          'Authorization': `Bearer ${token}`,
         },
       });
       if (!res.ok) throw new Error('Failed to delete property');
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['/api/properties'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/property'] });
       toast({
         title: "Success",
         description: "Property deleted successfully",
@@ -142,12 +144,12 @@ export default function PropertiesPage() {
 
         {/* Filters */}
         <div className="flex flex-wrap gap-2">
-          <Select value={selectedCity} onValueChange={setSelectedCity}>
+          <Select value={selectedCity || "all"} onValueChange={(value) => setSelectedCity(value === "all" ? "" : value)}>
             <SelectTrigger data-testid="select-city-filter" className="w-full sm:w-40">
               <SelectValue placeholder="All Cities" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Cities</SelectItem>
+              <SelectItem value="all">All Cities</SelectItem>
               {cities.map((city) => (
                 <SelectItem key={city.id} value={city.id.toString()}>
                   {city.name}
@@ -156,15 +158,15 @@ export default function PropertiesPage() {
             </SelectContent>
           </Select>
 
-          <Select value={selectedType} onValueChange={setSelectedType}>
+          <Select value={selectedType || "all"} onValueChange={(value) => setSelectedType(value === "all" ? "" : value)}>
             <SelectTrigger data-testid="select-type-filter" className="w-full sm:w-40">
               <SelectValue placeholder="All Types" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All Types</SelectItem>
+              <SelectItem value="all">All Types</SelectItem>
               {propertyTypes.map((type) => (
                 <SelectItem key={type.id} value={type.id.toString()}>
-                  {type.iconUrl} {type.name}
+                  {type.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -227,7 +229,7 @@ export default function PropertiesPage() {
         propertyId={editingPropertyId}
         onSave={() => {
           setFormOpen(false);
-          queryClient.invalidateQueries({ queryKey: ['/api/properties'] });
+          queryClient.invalidateQueries({ queryKey: ['/api/property'] });
         }}
       />
 
@@ -322,7 +324,7 @@ function PropertyCard({
             </span>
             <span className="text-sm text-muted-foreground">/night</span>
           </div>
-          {property.minNight > 1 && (
+          {property.minNight && property.minNight > 1 && (
             <span className="text-xs text-muted-foreground">
               Min {property.minNight} nights
             </span>

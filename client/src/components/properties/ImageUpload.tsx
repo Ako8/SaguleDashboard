@@ -4,7 +4,7 @@ import { useDropzone } from "react-dropzone";
 import { Upload, X, Image as ImageIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient } from "@/lib/queryClient";
+import { queryClient, buildApiUrl } from "@/lib/queryClient";
 import type { Picture } from "@shared/schema";
 
 interface ImageUploadProps {
@@ -19,8 +19,9 @@ export function ImageUpload({ propertyId }: ImageUploadProps) {
   const { data: pictures = [], isLoading } = useQuery<Picture[]>({
     queryKey: ['/api/pictures', 'Property', propertyId],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/pictures/Property/${propertyId}`, {
+      const token = localStorage.getItem('auth_token');
+      const url = buildApiUrl(`/api/pictures/entity/Property/${propertyId}`);
+      const res = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -34,8 +35,9 @@ export function ImageUpload({ propertyId }: ImageUploadProps) {
   // Delete mutation
   const deleteMutation = useMutation({
     mutationFn: async (id: number) => {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/pictures/${id}`, {
+      const token = localStorage.getItem('auth_token');
+      const url = buildApiUrl(`/api/pictures/${id}`);
+      const res = await fetch(url, {
         method: 'DELETE',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -61,11 +63,12 @@ export function ImageUpload({ propertyId }: ImageUploadProps) {
 
   // Upload function
   const uploadFile = async (file: File) => {
-    const token = localStorage.getItem('token');
+    const token = localStorage.getItem('auth_token');
     const formData = new FormData();
     formData.append('file', file);
+    const url = buildApiUrl(`/api/pictures/regular?entityId=${propertyId}&entityType=Property`);
 
-    const res = await fetch(`/api/pictures?entityId=${propertyId}&entityType=Property`, {
+    const res = await fetch(url, {
       method: 'POST',
       headers: {
         'Authorization': `Bearer ${token}`,

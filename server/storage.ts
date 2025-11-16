@@ -47,9 +47,11 @@ export interface IStorage {
   // Amenity methods
   getAllAmenities(): Promise<Amenity[]>;
   getAmenityCategories(): Promise<AmenityCategory[]>;
+  createAmenity(amenity: Omit<Amenity, 'id'>): Promise<number>;
   
   // Room methods
   getRoomsByProperty(propertyId: number): Promise<Room[]>;
+  getRoom(id: number): Promise<Room | null>;
   createRoom(room: Omit<Room, 'id'>): Promise<number>;
   updateRoom(id: number, room: Omit<Room, 'id'>): Promise<void>;
   deleteRoom(id: number): Promise<void>;
@@ -131,9 +133,19 @@ export class DatabaseStorage implements IStorage {
     return await db.select().from(amenityCategories);
   }
   
+  async createAmenity(amenity: Omit<Amenity, 'id'>): Promise<number> {
+    const [created] = await db.insert(amenities).values(amenity).returning();
+    return created.id;
+  }
+  
   // Room methods
   async getRoomsByProperty(propertyId: number): Promise<Room[]> {
     return await db.select().from(rooms).where(eq(rooms.propertyId, propertyId));
+  }
+  
+  async getRoom(id: number): Promise<Room | null> {
+    const [room] = await db.select().from(rooms).where(eq(rooms.id, id)).limit(1);
+    return room || null;
   }
   
   async createRoom(room: Omit<Room, 'id'>): Promise<number> {

@@ -29,10 +29,43 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
-import { queryClient } from "@/lib/queryClient";
-import type { Property, PropertyType, City, Amenity, Picture } from "@shared/schema";
-import { propertyFormSchema } from "@shared/schema";
+import { queryClient, buildApiUrl } from "@/lib/queryClient";
+import type { Property, PropertyType, City, Amenity, Picture, Availability, Room, RoomType, AmenityCategory } from "@shared/schema";
+import { propertyFormSchema, roomFormSchema } from "@shared/schema";
 import { ImageUpload } from "./ImageUpload";
+
+// Helper function to decode JWT token and extract user ID
+function getUserIdFromToken(token: string | null): string | null {
+  if (!token) return null;
+  
+  try {
+    // JWT tokens have 3 parts separated by dots: header.payload.signature
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    
+    // Decode the payload (second part)
+    const payload = JSON.parse(atob(parts[1]));
+    
+    // Try different possible claim paths
+    if (payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier']) {
+      return payload['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'].toString();
+    }
+    if (payload.userId) {
+      return payload.userId.toString();
+    }
+    if (payload.sub) {
+      return payload.sub.toString();
+    }
+    if (payload.id) {
+      return payload.id.toString();
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error decoding token:', error);
+    return null;
+  }
+}
 
 interface PropertyFormProps {
   open: boolean;
@@ -45,26 +78,82 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
   const [activeTab, setActiveTab] = useState("basic");
   const { toast } = useToast();
   const isEditMode = propertyId !== null;
+  
+  // Room form
+  const roomForm = useForm<z.infer<typeof roomFormSchema>>({
+    resolver: zodResolver(roomFormSchema),
+    defaultValues: {
+      roomTypeId: 0,
+      availibilityId: 1,
+      capacity: undefined,
+      bedsCount: undefined,
+      description: "",
+    },
+  });
+
+  // Amenity form
+  const amenityForm = useForm<{
+    name: string;
+    icon: string;
+    amenityCategoryId: number;
+  }>({
+    defaultValues: {
+      name: "",
+      icon: "",
+      amenityCategoryId: 0,
+    },
+  });
 
   // Fetch reference data
   const { data: propertyTypes = [] } = useQuery<PropertyType[]>({
-    queryKey: ['/api/property-types'],
+    queryKey: ['/api/propertytype'],
   });
 
   const { data: cities = [] } = useQuery<City[]>({
-    queryKey: ['/api/cities'],
+    queryKey: ['/api/city'],
   });
 
   const { data: amenities = [] } = useQuery<Amenity[]>({
-    queryKey: ['/api/amenities'],
+    queryKey: ['/api/amenity'],
+  });
+
+  const { data: amenityCategories = [] } = useQuery<AmenityCategory[]>({
+    queryKey: ['/api/AmenityCategory'],
+  });
+
+  const { data: availabilities = [] } = useQuery<Availability[]>({
+    queryKey: ['/api/Availibility'],
+  });
+
+  const { data: roomTypes = [] } = useQuery<RoomType[]>({
+    queryKey: ['/api/RoomType'],
+  });
+
+  // Fetch existing rooms for the property
+  const { data: rooms = [], refetch: refetchRooms } = useQuery<Room[]>({
+    queryKey: ['/api/room/property', propertyId],
+    queryFn: async () => {
+      if (!propertyId) return [];
+      const token = localStorage.getItem('auth_token');
+      const url = buildApiUrl(`/api/room/property/${propertyId}`);
+      const res = await fetch(url, {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+      if (!res.ok) throw new Error('Failed to fetch rooms');
+      return await res.json();
+    },
+    enabled: isEditMode && !!propertyId && open,
   });
 
   // Fetch property data if editing
   const { data: property } = useQuery<Property>({
-    queryKey: ['/api/properties', propertyId],
+    queryKey: ['/api/property', propertyId],
     queryFn: async () => {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`/api/properties/${propertyId}`, {
+      const token = localStorage.getItem('auth_token');
+      const url = buildApiUrl(`/api/property/${propertyId}`);
+      const res = await fetch(url, {
         headers: {
           'Authorization': `Bearer ${token}`,
         },
@@ -90,6 +179,7 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
       checkInTime: "14:00:00",
       checkOutTime: "11:00:00",
       mapLocation: "",
+      availibilityId: 1,
     },
   });
 
@@ -104,11 +194,12 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
           propertyTypeId: property.propertyTypeId,
           cityId: property.cityId,
           price: property.price,
-          minNight: property.minNight,
-          maxNight: property.maxNight,
-          checkInTime: property.checkInTime,
-          checkOutTime: property.checkOutTime,
+          minNight: property.minNight || 1,
+          maxNight: property.maxNight || 30,
+          checkInTime: property.checkInTime || "14:00:00",
+          checkOutTime: property.checkOutTime || "11:00:00",
           mapLocation: property.mapLocation || "",
+          availibilityId: property.availabilityId || 1,
         });
       } else {
         form.reset({
@@ -123,6 +214,7 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
           checkInTime: "14:00:00",
           checkOutTime: "11:00:00",
           mapLocation: "",
+          availibilityId: 1,
         });
       }
       setActiveTab("basic");
@@ -132,9 +224,22 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
   // Create/Update mutation
   const saveMutation = useMutation({
     mutationFn: async (data: z.infer<typeof propertyFormSchema>) => {
-      const token = localStorage.getItem('token');
-      const url = isEditMode ? `/api/properties/${propertyId}` : '/api/properties';
+      const token = localStorage.getItem('auth_token');
+      const userId = getUserIdFromToken(token);
+      
+      if (!userId) {
+        throw new Error('User ID not found in token');
+      }
+      
+      const path = isEditMode ? `/api/property/${propertyId}` : '/api/property';
+      const url = buildApiUrl(path);
       const method = isEditMode ? 'PUT' : 'POST';
+
+      // Include hostId in the payload
+      const payload = {
+        ...data,
+        hostId: userId,
+      };
 
       const res = await fetch(url, {
         method,
@@ -142,7 +247,7 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${token}`,
         },
-        body: JSON.stringify(data),
+        body: JSON.stringify(payload),
       });
 
       if (!res.ok) {
@@ -159,7 +264,7 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
         title: "Success",
         description: `Property ${isEditMode ? 'updated' : 'created'} successfully`,
       });
-      queryClient.invalidateQueries({ queryKey: ['/api/properties'] });
+      queryClient.invalidateQueries({ queryKey: ['/api/property'] });
       onSave();
       form.reset();
     },
@@ -172,8 +277,146 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
     },
   });
 
+  // Create room mutation
+  const createRoomMutation = useMutation({
+    mutationFn: async (data: z.infer<typeof roomFormSchema>) => {
+      if (!propertyId) {
+        throw new Error('Property ID is required');
+      }
+      
+      const token = localStorage.getItem('auth_token');
+      const url = buildApiUrl('/api/Room');
+      
+      const payload = {
+        propertyId: propertyId,
+        roomTypeId: data.roomTypeId,
+        availibilityId: data.availibilityId || 1,
+        capacity: data.capacity || undefined,
+        bedsCount: data.bedsCount || undefined,
+        description: data.description || undefined,
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to create room');
+      }
+
+      return await res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Room added successfully",
+      });
+      refetchRooms();
+      roomForm.reset();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  // Delete room mutation
+  const deleteRoomMutation = useMutation({
+    mutationFn: async (roomId: number) => {
+      const token = localStorage.getItem('auth_token');
+      const url = buildApiUrl(`/api/Room/${roomId}`);
+      
+      const res = await fetch(url, {
+        method: 'DELETE',
+        headers: {
+          'Authorization': `Bearer ${token}`,
+        },
+      });
+
+      if (!res.ok) {
+        throw new Error('Failed to delete room');
+      }
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Room deleted successfully",
+      });
+      refetchRooms();
+    },
+    onError: () => {
+      toast({
+        title: "Error",
+        description: "Failed to delete room",
+        variant: "destructive",
+      });
+    },
+  });
+
   const onSubmit = (data: z.infer<typeof propertyFormSchema>) => {
     saveMutation.mutate(data);
+  };
+
+  const onRoomSubmit = (data: z.infer<typeof roomFormSchema>) => {
+    createRoomMutation.mutate(data);
+  };
+
+  // Create amenity mutation
+  const createAmenityMutation = useMutation({
+    mutationFn: async (data: { name: string; icon: string; amenityCategoryId: number }) => {
+      const token = localStorage.getItem('auth_token');
+      const url = buildApiUrl('/api/Amenity');
+      
+      const payload = {
+        name: data.name,
+        icon: data.icon,
+        amenityCategoryId: data.amenityCategoryId,
+      };
+
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        throw new Error(error.message || 'Failed to create amenity');
+      }
+
+      return await res.json();
+    },
+    onSuccess: () => {
+      toast({
+        title: "Success",
+        description: "Amenity added successfully",
+      });
+      queryClient.invalidateQueries({ queryKey: ['/api/amenity'] });
+      amenityForm.reset();
+    },
+    onError: (error: Error) => {
+      toast({
+        title: "Error",
+        description: error.message,
+        variant: "destructive",
+      });
+    },
+  });
+
+  const onAmenitySubmit = (data: { name: string; icon: string; amenityCategoryId: number }) => {
+    createAmenityMutation.mutate(data);
   };
 
   const handleClose = () => {
@@ -289,7 +532,7 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
                             <SelectContent>
                               {propertyTypes.map((type) => (
                                 <SelectItem key={type.id} value={type.id.toString()}>
-                                  {type.iconUrl} {type.name}
+                                  {type.name}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -318,6 +561,34 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
                               {cities.map((city) => (
                                 <SelectItem key={city.id} value={city.id.toString()}>
                                   {city.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <FormMessage />
+                        </FormItem>
+                      )}
+                    />
+
+                    <FormField
+                      control={form.control}
+                      name="availibilityId"
+                      render={({ field }) => (
+                        <FormItem>
+                          <FormLabel>Availability *</FormLabel>
+                          <Select
+                            value={field.value?.toString() || ""}
+                            onValueChange={(value) => field.onChange(parseInt(value))}
+                          >
+                            <FormControl>
+                              <SelectTrigger data-testid="select-availability">
+                                <SelectValue placeholder="Select availability" />
+                              </SelectTrigger>
+                            </FormControl>
+                            <SelectContent>
+                              {availabilities.map((availability) => (
+                                <SelectItem key={availability.id} value={availability.id.toString()}>
+                                  {availability.name}
                                 </SelectItem>
                               ))}
                             </SelectContent>
@@ -448,25 +719,301 @@ export function PropertyForm({ open, onClose, propertyId, onSave }: PropertyForm
 
               {/* Tab 3: Rooms */}
               <TabsContent value="rooms" className="mt-4">
-                <div className="text-center py-12 border-2 border-dashed rounded-lg">
-                  <p className="text-muted-foreground">
-                    Rooms can be added after the property is created.
-                  </p>
-                  <p className="text-muted-foreground text-sm mt-2">
-                    Save the property first, then edit it to add rooms.
-                  </p>
-                </div>
+                {!isEditMode || !propertyId ? (
+                  <div className="text-center py-12 border-2 border-dashed rounded-lg">
+                    <p className="text-muted-foreground">
+                      Rooms can be added after the property is created.
+                    </p>
+                    <p className="text-muted-foreground text-sm mt-2">
+                      Save the property first, then edit it to add rooms.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* Add Room Form */}
+                    <div className="border rounded-lg p-4">
+                      <h3 className="text-lg font-semibold mb-4">Add New Room</h3>
+                      <Form {...roomForm}>
+                        <form onSubmit={roomForm.handleSubmit(onRoomSubmit)} className="space-y-4">
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <FormField
+                              control={roomForm.control}
+                              name="roomTypeId"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Room Type *</FormLabel>
+                                  <Select
+                                    value={field.value?.toString() || ""}
+                                    onValueChange={(value) => field.onChange(parseInt(value))}
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Select room type" />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                      {roomTypes.map((type) => (
+                                        <SelectItem key={type.id} value={type.id.toString()}>
+                                          {type.iconUrl} {type.name}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={roomForm.control}
+                              name="availibilityId"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Availability</FormLabel>
+                                  <Select
+                                    value={field.value?.toString() || "1"}
+                                    onValueChange={(value) => field.onChange(parseInt(value))}
+                                  >
+                                    <FormControl>
+                                      <SelectTrigger>
+                                        <SelectValue placeholder="Select availability" />
+                                      </SelectTrigger>
+                                    </FormControl>
+                                    <SelectContent>
+                                      {availabilities.map((availability) => (
+                                        <SelectItem key={availability.id} value={availability.id.toString()}>
+                                          {availability.name}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={roomForm.control}
+                              name="capacity"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Capacity</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      type="number"
+                                      placeholder="Number of people"
+                                      {...field}
+                                      onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+
+                            <FormField
+                              control={roomForm.control}
+                              name="bedsCount"
+                              render={({ field }) => (
+                                <FormItem>
+                                  <FormLabel>Beds Count</FormLabel>
+                                  <FormControl>
+                                    <Input
+                                      type="number"
+                                      placeholder="Number of beds"
+                                      {...field}
+                                      onChange={(e) => field.onChange(e.target.value ? parseInt(e.target.value) : undefined)}
+                                    />
+                                  </FormControl>
+                                  <FormMessage />
+                                </FormItem>
+                              )}
+                            />
+                          </div>
+
+                          <FormField
+                            control={roomForm.control}
+                            name="description"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Description</FormLabel>
+                                <FormControl>
+                                  <Textarea
+                                    placeholder="Room description"
+                                    rows={3}
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <Button
+                            type="submit"
+                            disabled={createRoomMutation.isPending}
+                          >
+                            {createRoomMutation.isPending ? 'Adding...' : 'Add Room'}
+                          </Button>
+                        </form>
+                      </Form>
+                    </div>
+
+                    {/* Existing Rooms List */}
+                    <div>
+                      <h3 className="text-lg font-semibold mb-4">Existing Rooms</h3>
+                      {rooms.length === 0 ? (
+                        <div className="text-center py-8 border-2 border-dashed rounded-lg">
+                          <p className="text-muted-foreground">No rooms added yet</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {rooms.map((room) => {
+                            const roomType = roomTypes.find(rt => rt.id === room.roomTypeId);
+                            const availability = availabilities.find(a => a.id === room.availabilityId);
+                            return (
+                              <div key={room.id} className="border rounded-lg p-4 flex justify-between items-start">
+                                <div className="flex-1">
+                                  <div className="flex items-center gap-2 mb-2">
+                                    <span className="text-lg">{roomType?.iconUrl || '🏠'}</span>
+                                    <h4 className="font-medium">{roomType?.name || 'Unknown Room Type'}</h4>
+                                    {availability && (
+                                      <span className="text-xs bg-muted px-2 py-1 rounded">
+                                        {availability.name}
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-sm text-muted-foreground space-y-1">
+                                    {room.capacity && <p>Capacity: {room.capacity} people</p>}
+                                    {room.bedsCount !== null && <p>Beds: {room.bedsCount}</p>}
+                                    {room.description && <p>{room.description}</p>}
+                                  </div>
+                                </div>
+                                <Button
+                                  variant="destructive"
+                                  size="sm"
+                                  onClick={() => deleteRoomMutation.mutate(room.id)}
+                                  disabled={deleteRoomMutation.isPending}
+                                >
+                                  Delete
+                                </Button>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
               </TabsContent>
 
               {/* Tab 4: Amenities */}
               <TabsContent value="amenities" className="mt-4">
-                <div className="text-center py-12 border-2 border-dashed rounded-lg">
-                  <p className="text-muted-foreground">
-                    Amenity management coming soon
-                  </p>
-                  <p className="text-muted-foreground text-sm mt-2">
-                    You'll be able to assign amenities to properties in a future update
-                  </p>
+                <div className="space-y-6">
+                  {/* Add Amenity Form */}
+                  <div className="border rounded-lg p-4">
+                    <h3 className="text-lg font-semibold mb-4">Add New Amenity</h3>
+                    <Form {...amenityForm}>
+                      <form onSubmit={amenityForm.handleSubmit(onAmenitySubmit)} className="space-y-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <FormField
+                            control={amenityForm.control}
+                            name="name"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Amenity Name *</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    placeholder="e.g., WiFi, Pool, Parking"
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+
+                          <FormField
+                            control={amenityForm.control}
+                            name="icon"
+                            render={({ field }) => (
+                              <FormItem>
+                                <FormLabel>Icon *</FormLabel>
+                                <FormControl>
+                                  <Input
+                                    placeholder="e.g., 📶, 🏊, 🚗"
+                                    {...field}
+                                  />
+                                </FormControl>
+                                <FormMessage />
+                              </FormItem>
+                            )}
+                          />
+                        </div>
+
+                        <FormField
+                          control={amenityForm.control}
+                          name="amenityCategoryId"
+                          render={({ field }) => (
+                            <FormItem>
+                              <FormLabel>Category *</FormLabel>
+                              <Select
+                                value={field.value?.toString() || ""}
+                                onValueChange={(value) => field.onChange(parseInt(value))}
+                              >
+                                <FormControl>
+                                  <SelectTrigger>
+                                    <SelectValue placeholder="Select category" />
+                                  </SelectTrigger>
+                                </FormControl>
+                                <SelectContent>
+                                  {amenityCategories.map((category) => (
+                                    <SelectItem key={category.id} value={category.id.toString()}>
+                                      {category.name}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              <FormMessage />
+                            </FormItem>
+                          )}
+                        />
+
+                        <Button
+                          type="submit"
+                          disabled={createAmenityMutation.isPending}
+                        >
+                          {createAmenityMutation.isPending ? 'Adding...' : 'Add Amenity'}
+                        </Button>
+                      </form>
+                    </Form>
+                  </div>
+
+                  {/* Existing Amenities List */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-4">Existing Amenities</h3>
+                    {amenities.length === 0 ? (
+                      <div className="text-center py-8 border-2 border-dashed rounded-lg">
+                        <p className="text-muted-foreground">No amenities added yet</p>
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        {amenitiesByCategory && Object.entries(amenitiesByCategory).map(([category, categoryAmenities]) => (
+                          <div key={category} className="border rounded-lg p-4">
+                            <h4 className="font-medium mb-3">{category}</h4>
+                            <div className="grid grid-cols-2 md:grid-cols-3 gap-3">
+                              {categoryAmenities.map((amenity) => (
+                                <div key={amenity.id} className="flex items-center gap-2 p-2 border rounded">
+                                  <span className="text-lg">{amenity.icon}</span>
+                                  <span className="text-sm">{amenity.name}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </TabsContent>
             </Tabs>
